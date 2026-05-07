@@ -1218,6 +1218,46 @@ footer span{color:rgba(74,144,217,0.8);}
   <p>▶ <span>iM AX 챌린지 2026</span> — 1단계 : 알 품기 &nbsp;|&nbsp; AI 키우기 : 알 품기 → 부화하기 → 날갯짓하기 &nbsp;|&nbsp; © 2026 iM뱅크 HR부</p>
 </footer>
 
+<!-- 우측 하단 고정 저작권 표시 -->
+<div class="copyright-fixed">© 2026 iM뱅크. All Rights Reserved.</div>
+
+<style>
+.copyright-fixed{
+  position:fixed;
+  right:16px;
+  bottom:14px;
+  font-family:'Inter',sans-serif;
+  font-size:0.68rem;
+  font-weight:500;
+  color:rgba(13,44,110,0.55);
+  letter-spacing:0.04em;
+  background:rgba(255,255,255,0.55);
+  backdrop-filter:blur(6px);
+  -webkit-backdrop-filter:blur(6px);
+  padding:6px 12px;
+  border-radius:20px;
+  border:1px solid rgba(74,144,217,0.12);
+  pointer-events:none;
+  z-index:99997;
+  user-select:none;
+  white-space:nowrap;
+}
+@media(max-width:768px){
+  .copyright-fixed{
+    right:10px;
+    bottom:10px;
+    font-size:0.58rem;
+    padding:5px 10px;
+  }
+}
+@media(max-width:380px){
+  .copyright-fixed{
+    font-size:0.54rem;
+    padding:4px 9px;
+  }
+}
+</style>
+
 <script>
 /* ── reveal 애니메이션 + 안전 fallback ── */
 (function(){
