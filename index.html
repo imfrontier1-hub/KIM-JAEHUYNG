@@ -1748,8 +1748,10 @@ body, p, span, h1, h2, h3, h4, li, a, div {
   overflow-wrap: break-word;
 }
 
-/* 혹시라도 남아있을 수 있는 레이저 캔버스/도트 강제 숨김 */
-#laserCanvas, #cursorDot { display:none !important; }
+/* 레이저 커서/도트: 마우스(정밀 포인터) 환경에서만 표시, 터치 기기에서는 숨김 유지 */
+@media (hover: none), (pointer: coarse) {
+  #laserCanvas, #cursorDot { display:none !important; }
+}
 
 /* hover 잔여 효과 모바일에서 무력화 (touch 디바이스용) */
 @media (hover: none) {
@@ -2290,6 +2292,203 @@ body, p, span, h1, h2, h3, h4, li, a, div {
   });
 })();
 </script>
+
+<!-- ===== LASER POINTER OVERLAY (커서 추적 청록 레이저) ===== -->
+<canvas id="laserCanvas"></canvas>
+<div id="cursorDot"></div>
+<style id="laserPointerStyle">
+  #laserCanvas{
+    position:fixed; left:0; top:0;
+    width:100vw; height:100vh;
+    pointer-events:none;           /* 클릭/스크롤 방해 금지 (필수) */
+    z-index:2147483646;            /* 매우 높게 */
+  }
+  #cursorDot{
+    position:fixed; left:0; top:0;
+    width:8px; height:8px;
+    margin:-4px 0 0 -4px;          /* 8px 점을 커서 중심에 정렬 */
+    border-radius:50%;
+    background:#9bfff5;            /* 청록 발광점 */
+    box-shadow:
+      0 0 4px 1px  rgba(0,255,224,.95),
+      0 0 10px 2px rgba(0,255,224,.70),
+      0 0 20px 5px rgba(0,230,210,.45);   /* 네온 글로우 */
+    pointer-events:none;
+    z-index:2147483647;
+    opacity:0;                     /* 첫 이동 전까지 숨김 */
+    transform:translate3d(-100px,-100px,0);
+    will-change:transform,opacity;
+  }
+</style>
+<script id="laserPointerScript">
+(function(){
+  'use strict';
+  /* 중복 초기화 방지 (mousemove/resize/rAF 중복 등록 차단) */
+  if (window.__laserPointerInit) return;
+  window.__laserPointerInit = true;
+
+  /* 터치 등 비정밀 포인터 환경에서는 동작하지 않음 (모바일 보호) */
+  try{
+    if (window.matchMedia && !window.matchMedia('(pointer: fine)').matches) return;
+  }catch(e){}
+
+  var canvas = document.getElementById('laserCanvas');
+  var dot    = document.getElementById('cursorDot');
+  if (!canvas || !dot) return;
+  var ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  /* ── 설정값 (잔상 짧게) ─────────────────── */
+  var TRAIL_MAX = 28;    /* 좌표 개수 상한 (24~32 권장) */
+  var TRAIL_TTL = 120;   /* ms, 이보다 오래된 점은 제거 (100~140 권장) */
+  var SPARK_MAX = 40;    /* spark 최대 개수 */
+
+  var dpr = Math.max(1, window.devicePixelRatio || 1);
+  var W = 0, H = 0;
+  var trail  = [];
+  var sparks = [];
+  var mx = -100, my = -100;
+  var moved = false;
+
+  function resize(){
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width  = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); /* CSS px 좌표계로 그림 → 고해상도 선명 */
+  }
+
+  function onMove(e){
+    mx = e.clientX;
+    my = e.clientY;
+    if (!moved){ moved = true; dot.style.opacity = '1'; }
+    dot.style.transform = 'translate3d(' + mx + 'px,' + my + 'px,0)';
+
+    var now = performance.now();
+    trail.push({ x: mx, y: my, t: now });
+    if (trail.length > TRAIL_MAX) trail.shift();
+
+    /* 이동 시 0~2개 spark 생성 */
+    var n = (Math.random() * 3) | 0;
+    for (var i = 0; i < n; i++){
+      if (sparks.length >= SPARK_MAX) break;
+      var ang = Math.random() * Math.PI * 2;
+      var spd = Math.random() * 1.4 + 0.3;
+      sparks.push({
+        x: mx, y: my,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd - 0.3,
+        a: 1,
+        decay: Math.random() * 0.08 + 0.08,   /* 빠른 소멸 */
+        r: Math.random() * 1.6 + 0.6,
+        white: Math.random() < 0.4
+      });
+    }
+  }
+
+  function onLeave(){
+    moved = false;
+    dot.style.opacity = '0';
+    /* 잔상은 draw 루프의 TTL이 자연 제거 */
+  }
+
+  /* trail 점들을 부드러운 곡선 경로로 구성 */
+  function buildPath(pts){
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    if (pts.length === 2){
+      ctx.lineTo(pts[1].x, pts[1].y);
+      return;
+    }
+    for (var i = 1; i < pts.length - 1; i++){
+      var xc = (pts[i].x + pts[i + 1].x) / 2;
+      var yc = (pts[i].y + pts[i + 1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+    }
+    var last = pts.length - 1;
+    ctx.quadraticCurveTo(pts[last - 1].x, pts[last - 1].y, pts[last].x, pts[last].y);
+  }
+
+  /* 시작점 투명 → 커서 쪽으로 갈수록 밝아지는 그라디언트 */
+  function makeGrad(p0, p1, rgb, maxA){
+    var g = ctx.createLinearGradient(p0.x, p0.y, p1.x, p1.y);
+    g.addColorStop(0,   'rgba(' + rgb + ',0)');
+    g.addColorStop(0.6, 'rgba(' + rgb + ',' + (maxA * 0.4).toFixed(3) + ')');
+    g.addColorStop(1,   'rgba(' + rgb + ',' + maxA.toFixed(3) + ')');
+    return g;
+  }
+
+  function draw(){
+    var now = performance.now();
+
+    /* 오래된 trail 점 제거 (timestamp 기반) — 멈추면 ~0.12초 안에 사라짐 */
+    while (trail.length && (now - trail[0].t) > TRAIL_TTL) trail.shift();
+
+    ctx.clearRect(0, 0, W, H);
+
+    /* ── 4레이어 레이저 빔 ── */
+    if (trail.length >= 2){
+      var p0 = trail[0];
+      var p1 = trail[trail.length - 1];
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter'; /* 가산 합성 → 네온 발광 */
+      ctx.lineCap  = 'round';
+      ctx.lineJoin = 'round';
+
+      ctx.lineWidth = 14;                                    /* 외곽 글로우 */
+      ctx.strokeStyle = makeGrad(p0, p1, '0,255,224', 0.10);
+      buildPath(trail); ctx.stroke();
+
+      ctx.lineWidth = 7;                                     /* 중간 글로우 */
+      ctx.strokeStyle = makeGrad(p0, p1, '0,255,224', 0.22);
+      buildPath(trail); ctx.stroke();
+
+      ctx.lineWidth = 3;                                     /* 내부 빔 (청록) */
+      ctx.strokeStyle = makeGrad(p0, p1, '70,255,235', 0.60);
+      buildPath(trail); ctx.stroke();
+
+      ctx.lineWidth = 1.5;                                   /* 코어 (밝은 흰빛) */
+      ctx.strokeStyle = makeGrad(p0, p1, '220,255,250', 0.90);
+      buildPath(trail); ctx.stroke();
+
+      ctx.restore();
+    }
+
+    /* ── spark 파티클 ── */
+    if (sparks.length){
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (var i = sparks.length - 1; i >= 0; i--){
+        var s = sparks[i];
+        s.x += s.vx;
+        s.y += s.vy;
+        s.vy += 0.06;          /* 약한 중력 */
+        s.vx *= 0.99;
+        s.a  -= s.decay;       /* 빠른 alpha 감소 */
+        if (s.a <= 0){ sparks.splice(i, 1); continue; }
+        var col = s.white ? '230,255,250' : '0,255,224';
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(' + col + ',' + s.a.toFixed(3) + ')';
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  resize();
+  window.addEventListener('resize',    resize,  { passive:true });
+  window.addEventListener('mousemove', onMove,  { passive:true });
+  document.addEventListener('mouseleave', onLeave, { passive:true });
+  requestAnimationFrame(draw);
+})();
+</script>
+<!-- ===== /LASER POINTER OVERLAY ===== -->
 
 </body>
 </html>
